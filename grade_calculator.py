@@ -27,14 +27,13 @@ CATEGORIES = [
 ]
 
 ABOUT_TEXT = (
-    "Thank you for using the Grade Calculator application, developed by Logan Hartman.\n"
+    "Thank you for using the Grade Calculator application, developed by Kora Hartman.\n\n"
     "This application is provided to you, the user, without any warranty, implied or otherwise.\n\n"
-    "For questions or concerns about the application, contact:\n"
-    "hartman.devs@gmail.com"
+    "For questions or concerns about the application, contact hartman.devs@gmail.com."
 )
 
 # ---------------------------------------------------------------------------
-# Theme palette  (slate-blue)
+# Theme palette  (greyscale)
 # ---------------------------------------------------------------------------
 
 PALETTE = {
@@ -52,8 +51,6 @@ PALETTE = {
     "btn_fg":       "#ffffff",   # button label
     "btn_hover":    "#555555",   # button hover / pressed
     "sep":          "#a0a0a0",   # separator line
-    "sb":           "#c0c0c0",   # scrollbar background (troughcolor)
-    "sb_hover":     "#b8b8b8",   # scrollbar background on hover (active)
 }
 
 
@@ -181,6 +178,7 @@ class GradeCalculatorApp(tk.Tk):
 
         # Bind after sizing is finalised so the first event sees the correct geometry.
         nb.bind("<Configure>", self._on_notebook_configure)
+        self._welcome_frame.bind("<Configure>", self._on_welcome_resize)
 
     # ------------------------------------------------------------------
     # Proxy: adapts a list of Entry widgets to the single-widget API
@@ -193,7 +191,7 @@ class GradeCalculatorApp(tk.Tk):
         def get(self) -> str:
             return ", ".join(e.get() for e in self._entries if e.get().strip())
 
-        def insert(self, value: str):
+        def insert(self, _, value: str):
             parts = [v.strip() for v in value.split(",") if v.strip()]
 
             for i, e in enumerate(self._entries):
@@ -247,14 +245,6 @@ class GradeCalculatorApp(tk.Tk):
                   background=[("active", P["btn_hover"]), ("pressed", P["btn_hover"])],
                   foreground=[("active", P["btn_fg"]),    ("pressed", P["btn_fg"])])
 
-        # Scrollbar
-        style.configure("Vertical.TScrollbar",
-                        background=P["sep"],
-                        troughcolor=P["sb"],
-                        bordercolor=P["panel"],
-                        arrowcolor=P["fg"])
-        style.map("Vertical.TScrollbar",
-                  background=[("active", P["sb_hover"])])
 
         # Separator
         style.configure("TSeparator", background=P["sep"])
@@ -321,10 +311,15 @@ class GradeCalculatorApp(tk.Tk):
 
         if not num_tabs:
             return
-        
+
         ttk.Style().configure(
             "TNotebook.Tab", width=max(self._min_tab_w, event.width // num_tabs)
         )
+
+    def _on_welcome_resize(self, event):
+        w = max(event.width - 28, 1)  # subtract 14px padding on each side
+        for lbl in self._welcome_wrap_labels:
+            lbl.configure(wraplength=w)
 
     # ---- Welcome tab -----------------------------------------------
     def _build_welcome_tab(self, nb):
@@ -332,13 +327,14 @@ class GradeCalculatorApp(tk.Tk):
         nb.add(frame, text="Welcome")
 
         # Intro — centered
-        ttk.Label(
+        intro_label = ttk.Label(
             frame,
             text=(
                 "Welcome to the grade calculator! Determine your grade by following these steps:"
             ),
             wraplength=480, justify="center"
-        ).grid(row=0, column=0, pady=(0, 12))
+        )
+        intro_label.grid(row=0, column=0, pady=(0, 12))
 
         # Steps — centered as a block; items stay left-aligned within the block
         steps_frame = ttk.Frame(frame)
@@ -350,10 +346,11 @@ class GradeCalculatorApp(tk.Tk):
             "3. Click 'Calculate Grades' in the Results tab to see your final grade.",
         ]
 
+        step_labels = []
         for i, step in enumerate(steps):
-            ttk.Label(steps_frame, text=step, wraplength=420, justify="left").grid(
-                row=i, column=0, sticky="w", pady=(0, 4)
-            )
+            lbl = ttk.Label(steps_frame, text=step, wraplength=420, justify="left")
+            lbl.grid(row=i, column=0, sticky="w", pady=(0, 4))
+            step_labels.append(lbl)
 
         # Weight Possible — centered
         wp_frame = ttk.Frame(frame)
@@ -363,8 +360,13 @@ class GradeCalculatorApp(tk.Tk):
         self._weight_possible.insert(0, "100")
         self._weight_possible.pack(side="left")
         self._weight_possible.bind("<KeyRelease>", self._filter_numeric_list)
+        ttk.Label(wp_frame, text="%").pack(side="left", padx=(4, 0))
 
         frame.columnconfigure(0, weight=1)
+
+        # Store refs so __init__ can bind after sizing is finalised.
+        self._welcome_frame = frame
+        self._welcome_wrap_labels = [intro_label] + step_labels
 
     # ---- Generic dynamic tab (Exams / Homework / Labs / Quizzes / In-Class) ---
 
@@ -372,17 +374,38 @@ class GradeCalculatorApp(tk.Tk):
         outer = ttk.Frame(nb, padding=14)
         nb.add(outer, text=tab_label)
 
-        canvas = tk.Canvas(outer, highlightthickness=0, background=PALETTE["panel"])
+        canvas = tk.Canvas(outer, highlightthickness=0, bd=0, background=PALETTE["panel"])
         scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
-        canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        canvas.pack(side="left", fill="both", expand=True)
+
+        def _set_scroll(first, last):
+            scrollbar.set(first, last)
+            if float(first) <= 0.0 and float(last) >= 1.0:
+                scrollbar.grid_remove()
+            else:
+                scrollbar.grid()
+
+        canvas.configure(yscrollcommand=_set_scroll)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar.grid(row=0, column=1, sticky="ns", padx=(6, 0))
+        outer.columnconfigure(0, weight=1)
+        outer.rowconfigure(0, weight=1)
 
         frame = ttk.Frame(canvas)
         canvas_window = canvas.create_window((0, 0), window=frame, anchor="nw")
 
-        frame.bind("<Configure>",  lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
+        def update_scroll_region():
+            canvas.configure(scrollregion=(
+                0, 0,
+                frame.winfo_reqwidth(),
+                max(frame.winfo_reqheight(), canvas.winfo_height()),
+            ))
+
+        def on_canvas_configure(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+            update_scroll_region()
+
+        frame.bind("<Configure>", lambda _: update_scroll_region())
+        canvas.bind("<Configure>", on_canvas_configure)
 
         ttk.Label(frame, text="Weight", font=("", 10, "bold")).grid(
             row=0, column=1, padx=(0, 6), pady=(0, 4), sticky="w"
@@ -469,6 +492,10 @@ class GradeCalculatorApp(tk.Tk):
         text = widget.get()
         cleaned = "".join(c for c in text if c in NUMERIC_CHARS)
 
+        if cleaned.count(".") > 1:
+            first_dot = cleaned.index(".")
+            cleaned = cleaned[:first_dot + 1] + cleaned[first_dot + 1:].replace(".", "")
+
         if cleaned != text:
             pos = widget.index(tk.INSERT)
             widget.delete(0, tk.END)
@@ -498,26 +525,29 @@ class GradeCalculatorApp(tk.Tk):
         # Convert whole-number weights (e.g. 25) to decimal form (0.25)
         # A weight is treated as a whole number when it is >= 1.
         def normalise_weights(wlist):
-            return [
-                str(Decimal(w) / Decimal(100)) if Decimal(w) >= 1 else w
-                for w in wlist
-            ]
-        
-        weights = {k: normalise_weights(v) for k, v in weights.items()}
+            result = []
+            for w in wlist:
+                try:
+                    d = Decimal(w)
+                except InvalidOperation:
+                    raise ValueError(f"ERROR: {w!r} is not a valid numeric value!")
+                result.append(str(d / Decimal(100)) if d >= 1 else w)
+            return result
 
         try:
+            weights = {k: normalise_weights(v) for k, v in weights.items()}
             total_weight = calculate_total_weight([weights[k] for k, _ in CATEGORIES])
         except Exception as exc:
             self._error(str(exc))
             return
 
         if total_weight.compare(weight_possible) != Decimal(0):
-            self._error(
-                f"ERROR: Weights entered do not equal {wp_text}%!\n\n"
-                f"(Current total: {float(total_weight * 100):.4g}%)"
+            messagebox.showwarning(
+                "Warning",
+                f"Weights entered do not equal {wp_text}%!\n\n"
+                f"(Current total: {float(total_weight * 100):.4g}%)",
+                parent=self,
             )
-
-            return
 
         results = {}
         for key, label in CATEGORIES:
@@ -592,16 +622,23 @@ class GradeCalculatorApp(tk.Tk):
             # 0: weightPossible
             # 1/2: examW/G, 3/4: hwW/G, 5/6: labW/G,
             # 7/8: quizW/G, 9/10: inclassW/G, 11/12: miscW/G
-            order = ["exam", "homework", "lab", "quiz", "inclass", "misc"]
+            order = [k for k, _ in CATEGORIES]
             self._weight_possible.delete(0, tk.END)
             self._weight_possible.insert(0, lines[0] if lines else "100")
 
             for i, key in enumerate(order):
                 w_val = lines[1 + i * 2] if (1 + i * 2) < len(lines) else ""
                 g_val = lines[2 + i * 2] if (2 + i * 2) < len(lines) else ""
-                self._weight_entries[key].delete(0, tk.END)
+
+                w_parts = [v.strip() for v in w_val.split(",") if v.strip()]
+                g_parts = [v.strip() for v in g_val.split(",") if v.strip()]
+                needed  = max(len(w_parts), len(g_parts), 1)
+
+                self._reset_tab_rows(key)
+                for _ in range(needed - 1):
+                    self._add_grade_row(key)
+
                 self._weight_entries[key].insert(0, w_val)
-                self._grade_entries[key].delete(0, tk.END)
                 self._grade_entries[key].insert(0, g_val)
         except Exception:
             messagebox.showerror(
@@ -620,7 +657,7 @@ class GradeCalculatorApp(tk.Tk):
             return
         
         try:
-            order = ["exam", "homework", "lab", "quiz", "inclass", "misc"]
+            order = [k for k, _ in CATEGORIES]
             lines = [self._weight_possible.get()]
 
             for key in order:
