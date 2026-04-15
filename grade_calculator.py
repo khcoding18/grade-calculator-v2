@@ -144,6 +144,7 @@ class GradeCalculatorApp(tk.Tk):
         # State for dynamic tabs
         self._tab_next_row:    dict = {}
         self._tab_inner_frame: dict = {}
+        self._add_btn:         dict = {}
 
         self._apply_theme()
         self._build_menu()
@@ -211,6 +212,7 @@ class GradeCalculatorApp(tk.Tk):
     def _apply_theme(self):
         P = PALETTE
         style = ttk.Style(self)
+        self._style = style
         style.theme_use("clam")
 
         # Base defaults inherited by all ttk widgets
@@ -244,7 +246,6 @@ class GradeCalculatorApp(tk.Tk):
         style.map("TButton",
                   background=[("active", P["btn_hover"]), ("pressed", P["btn_hover"])],
                   foreground=[("active", P["btn_fg"]),    ("pressed", P["btn_fg"])])
-
 
         # Separator
         style.configure("TSeparator", background=P["sep"])
@@ -312,12 +313,13 @@ class GradeCalculatorApp(tk.Tk):
         if not num_tabs:
             return
 
-        ttk.Style().configure(
+        self._style.configure(
             "TNotebook.Tab", width=max(self._min_tab_w, event.width // num_tabs)
         )
 
     def _on_welcome_resize(self, event):
         w = max(event.width - 28, 1)  # subtract 14px padding on each side
+        
         for lbl in self._welcome_wrap_labels:
             lbl.configure(wraplength=w)
 
@@ -334,6 +336,7 @@ class GradeCalculatorApp(tk.Tk):
             ),
             wraplength=480, justify="center"
         )
+
         intro_label.grid(row=0, column=0, pady=(0, 12))
 
         # Steps — centered as a block; items stay left-aligned within the block
@@ -347,6 +350,7 @@ class GradeCalculatorApp(tk.Tk):
         ]
 
         step_labels = []
+
         for i, step in enumerate(steps):
             lbl = ttk.Label(steps_frame, text=step, wraplength=420, justify="left")
             lbl.grid(row=i, column=0, sticky="w", pady=(0, 4))
@@ -428,15 +432,17 @@ class GradeCalculatorApp(tk.Tk):
 
         self._add_grade_row(key)  # seed one row
 
-        ttk.Button(
+        btn = ttk.Button(
             frame, text="+ Add New Grade",
             command=lambda k=key: self._add_grade_row(k)
-        ).grid(row=999, column=0, columnspan=3, pady=(10, 2))
+        )
+        btn.grid(row=999, column=0, columnspan=3, pady=(10, 2))
+        self._add_btn[key] = btn
 
         frame.columnconfigure(1, weight=1)
         frame.columnconfigure(2, weight=1)
 
-    def _add_grade_row(self, key: str):
+    def _add_grade_row(self, key: str, focus: bool = True):
         frame = self._tab_inner_frame[key]
         row   = self._tab_next_row[key]
         self._tab_next_row[key] += 1
@@ -456,7 +462,9 @@ class GradeCalculatorApp(tk.Tk):
         g_entry.bind("<KeyRelease>", self._filter_numeric_list)
         self._grade_entry_lists[key].append(g_entry)
 
-        w_entry.focus_set()
+        if focus:
+            btn = self._add_btn.get(key)
+            (btn if btn else w_entry).focus_set()
 
     # ---- Results tab -----------------------------------------------
 
@@ -498,9 +506,13 @@ class GradeCalculatorApp(tk.Tk):
 
         if cleaned != text:
             pos = widget.index(tk.INSERT)
+            pre = "".join(c for c in text[:pos] if c in NUMERIC_CHARS)
+            if pre.count(".") > 1:
+                first_dot = pre.index(".")
+                pre = pre[:first_dot + 1] + pre[first_dot + 1:].replace(".", "")
             widget.delete(0, tk.END)
             widget.insert(0, cleaned)
-            widget.icursor(min(pos, len(cleaned)))
+            widget.icursor(min(len(pre), len(cleaned)))
 
     # ------------------------------------------------------------------
     # Calculate
@@ -531,7 +543,9 @@ class GradeCalculatorApp(tk.Tk):
                     d = Decimal(w)
                 except InvalidOperation:
                     raise ValueError(f"ERROR: {w!r} is not a valid numeric value!")
+                
                 result.append(str(d / Decimal(100)) if d >= 1 else w)
+            
             return result
 
         try:
@@ -602,7 +616,7 @@ class GradeCalculatorApp(tk.Tk):
             widget_list.clear()
         
         self._tab_next_row[key] = 2
-        self._add_grade_row(key)
+        self._add_grade_row(key, focus=False)
 
     def _handle_open(self):
         path = filedialog.askopenfilename(
@@ -635,16 +649,17 @@ class GradeCalculatorApp(tk.Tk):
                 needed  = max(len(w_parts), len(g_parts), 1)
 
                 self._reset_tab_rows(key)
+
                 for _ in range(needed - 1):
                     self._add_grade_row(key)
 
                 self._weight_entries[key].insert(0, w_val)
                 self._grade_entries[key].insert(0, g_val)
-        except Exception:
+        except Exception as exc:
             messagebox.showerror(
                 "Error",
-                "ERROR: File could not be loaded correctly. "
-                "It may have been moved, deleted, or it may be corrupt.",
+                f"ERROR: File could not be loaded correctly. "
+                f"It may have been moved, deleted, or it may be corrupt.\n\n{exc}",
                 parent=self,
             )
 
@@ -666,9 +681,9 @@ class GradeCalculatorApp(tk.Tk):
             
             with open(path, "w", encoding="utf-8") as f:
                 f.write("\n".join(lines) + "\n")
-        except Exception:
+        except Exception as exc:
             messagebox.showerror(
-                "Error", "ERROR: File could not be written to correctly.", parent=self,
+                "Error", f"ERROR: File could not be written to correctly.\n\n{exc}", parent=self,
             )
 
     def _handle_exit(self):

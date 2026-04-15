@@ -4,6 +4,8 @@ A desktop application for calculating a weighted course grade, built with Python
 
 Developed by Kora Hartman. For questions or concerns, contact hartman.devs@gmail.com.
 
+Developed with the assistance of [Claude](https://claude.ai) by Anthropic.
+
 ## Requirements
 
 - Python 3.10 or later (uses `list[str]` type hints)
